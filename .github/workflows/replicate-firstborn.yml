@@ -36,8 +36,6 @@ jobs:
           test -f /tmp/firstborn/package.json
 
       - name: Create a replica branch while preserving the existing Mohsen project
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
         shell: bash
         run: |
           set -euo pipefail
@@ -75,4 +73,5 @@ jobs:
             --title "Build Firstborn Forge replica in Mohsen" \
             --body "Automated source snapshot of Firstborn Forge. Existing Mohsen files are preserved under legacy-mohsen/. See docs/REPLICA_PROVENANCE.md for explicit scope limits. No merge or deployment is performed by this workflow."
         env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
