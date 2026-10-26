@@ -68,3 +68,14 @@
 - **[U] Full private-repository audit:** `G`, `brain-e2e-probe`, and remaining private-source coverage are not fully audited by the automated Forge workflow.
 - **[U] Live deployment state:** code-level exposure risks are verified; actual production domains, access controls, and hosting configurations were not exhaustively verified for every application.
 - **[U] Full-file/model audit:** this is a source-grounded cross-repository pass, not the output of a completed full-coverage model sweep for every file in every repository. Each repository still needs a file inventory, commit SHA, build/test result, and requirement-to-evidence ledger before it can be marked complete.
+
+
+## Latest verification ledger
+
+| Check | Evidence | Result |
+|---|---|---|
+| Mohsen Forge acceptance | [Run #40302800989](https://github.com/madnessgate44-debug/Mohsen/actions/runs/40302800989) | [V] Forge created the proof file and branch; the evidence artifact records 318 tests, lint, production build, model smoke, and diff check as passing. |
+| Acceptance PR CI | [Run #40303287604](https://github.com/madnessgate44-debug/Mohsen/actions/runs/40303287604) | [V] Completed successfully for [PR #6](https://github.com/madnessgate44-debug/Mohsen/pull/6). PR remains open and unmerged. |
+| Mohsen context/empty-plan fix | [Run #40302526713](https://github.com/madnessgate44-debug/Mohsen/actions/runs/40302526713) | [V] Replica CI passed after the compact-context retry fix. The earlier failed run #40302442498 was the TypeScript trace-status mismatch and was corrected before the passing run. |
+| Amina main CI | [Run #40304519038](https://github.com/madnessgate44-debug/Amina/actions/runs/40304519038) | [V] Latest inspected main run passed dependency install, blocking TypeScript check, the full `npm test` chain, and production build. This verifies that commit's CI, not every live production behavior. |
+| Firstborn cross-repository preflight | [Run #40303140497](https://github.com/madnessgate44-debug/Firstborn/actions/runs/40303140497) | [B] The fallback credential check still failed before target writes. Neither `FORGE_CROSS_REPO_TOKEN` nor `FORGE_DELIVER_TOKEN` was available to the workflow. |
