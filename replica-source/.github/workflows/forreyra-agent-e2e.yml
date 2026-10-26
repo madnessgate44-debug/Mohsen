@@ -1,0 +1,74 @@
+name: Forreyra Agent End-to-End
+on:
+  push:
+    branches: [test/forreyra-agent-e2e]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  forreyra-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Firstborn
+        uses: actions/checkout@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify Chromium is available
+        run: |
+          npx playwright install --with-deps chromium
+          node -e "const { chromium } = require('playwright'); console.log('Playwright Chromium package available:', typeof chromium.launch === 'function')"
+      - name: Run Forreyra CLI against a public page
+        run: |
+          npx tsx scripts/forreyra.ts https://example.com extract:Example
+      - name: Run Forge loop using Forreyra browser tools
+        env:
+          FIRSTBORN_KEYLESS_ONLY: 'true'
+          FORGE_ALLOW_BROWSER: 'true'
+          FORGE_LOOP_MAX_STEPS: '8'
+          FORGE_LOOP_MAX_RUNTIME_MS: '420000'
+          FORGE_LOOP_GOAL: 'Use the browser tools to open https://example.com, inspect the page, and report its exact page title, final URL, and one sentence of visible page text. Use browser_open first. Confirm your answer from the actual browser output. Do not edit files or use non-browser tools unless necessary.'
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          FORGE_LOOP_REF: ${{ github.ref_name }}
+        run: npx tsx src/agent/loop-runner.ts
+      - name: Assert Forge actually used Forreyra and observed the page
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('.firstborn/evidence/forge-loop.json')
+          if not path.exists():
+              raise SystemExit('FAIL: Forge did not write its evidence file.')
+          data = json.loads(path.read_text())
+          steps = data.get('steps', [])
+          opens = [
+              step for step in steps
+              if (step.get('action') or {}).get('tool') == 'browser_open'
+          ]
+          if not opens:
+              raise SystemExit('FAIL: Forge never invoked browser_open; a finish-only result is not an E2E pass.')
+          observed = [step for step in opens if (step.get('observation') or {}).get('ok') is True]
+          if not observed:
+              raise SystemExit('FAIL: browser_open was called but did not succeed.')
+          output = '\n'.join((step.get('observation') or {}).get('output', '') for step in observed)
+          for required in ('title: Example Domain', 'https://example.com', 'Example Domain'):
+              if required not in output:
+                  raise SystemExit(f'FAIL: browser_open output did not contain required evidence: {required!r}')
+          if data.get('status') != 'COMPLETED':
+              raise SystemExit(f'FAIL: Forge loop status was {data.get("status")!r}.')
+          print('PASS: Forge invoked browser_open successfully and the actual browser output contained the expected title, URL, and page text.')
+          print(f'Validated browser_open calls: {len(observed)}; total loop steps: {len(steps)}')
+          PY
+      - name: Upload Forge browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forreyra-agent-e2e-evidence
+          path: .firstborn/evidence/forge-loop.json
+          if-no-files-found: warn
