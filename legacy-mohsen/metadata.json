@@ -1,0 +1,6 @@
+{
+  "name": "Mission Control - GitHub AI Agent",
+  "description": "A comprehensive web-based dashboard and AI coding agent for managing GitHub repositories, browsing code, and pushing commits.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
