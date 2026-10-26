@@ -769,7 +769,7 @@ export class ForgeAgent {
           log('error', report.errorMessage);
           return finalize();
         }
-        trace('PLAN', 'REPAIRED', `compact retry proposed ${report.plannedChanges.length} file changes`);
+        trace('PLAN', 'PASSED', `compact retry proposed ${report.plannedChanges.length} file changes after empty-plan recovery`);
       }
 
       // Retry malformed exact anchors at most twice. Never relax matching or apply a guessed edit.
