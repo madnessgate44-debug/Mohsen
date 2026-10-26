@@ -1,0 +1,78 @@
+name: Replicate Firstborn Forge into Mohsen
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  replicate:
+    if: contains(github.event.issue.labels.*.name, 'forge-replica') && github.event.issue.author_association == 'OWNER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Mohsen
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Snapshot current Mohsen files for preservation
+        shell: bash
+        run: |
+          mkdir -p /tmp/mohsen-legacy
+          tar --exclude=.git --exclude=legacy-mohsen -cf - . | tar -C /tmp/mohsen-legacy -xf -
+
+      - name: Fetch the actual Firstborn source snapshot
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/madnessgate44-debug/Firstborn.git /tmp/firstborn
+          test -f /tmp/firstborn/.github/workflows/forge.yml
+          test -f /tmp/firstborn/src/agent/forge.ts
+          test -f /tmp/firstborn/package.json
+
+      - name: Create a replica branch while preserving the existing Mohsen project
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="forge-replica/firstborn-${ISSUE_NUMBER}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          tar --exclude=.git -C /tmp/firstborn -cf - . | tar -xf -
+          mkdir -p legacy-mohsen
+          cp -a /tmp/mohsen-legacy/. legacy-mohsen/
+          # Keep this replication workflow operational after the Firstborn snapshot is copied.
+          mkdir -p .github/workflows
+          cp legacy-mohsen/.github/workflows/replicate-firstborn.yml .github/workflows/replicate-firstborn.yml
+          mkdir -p docs
+          cat > docs/REPLICA_PROVENANCE.md <<'EOF'
+          # Replica provenance
+
+          This branch is a source snapshot copied from the public repository
+          https://github.com/madnessgate44-debug/Firstborn at the time this workflow ran.
+
+          The original Mohsen files are preserved under `legacy-mohsen/`.
+          The replication workflow is retained at `.github/workflows/replicate-firstborn.yml`
+          so the operation can be repeated from the Mohsen default branch.
+
+          This is a file snapshot, not a history-preserving Git fork. Git history,
+          repository settings, secrets, environment protection rules, and external
+          integrations are not copied.
+          EOF
+          git add -A
+          git diff --cached --quiet && { echo "No changes to replicate"; exit 1; } || true
+          git commit -m "Build Firstborn Forge replica in Mohsen"
+          git push --set-upstream origin "$BRANCH"
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --title "Build Firstborn Forge replica in Mohsen" \
+            --body "Automated source snapshot of Firstborn Forge. Existing Mohsen files are preserved under legacy-mohsen/. See docs/REPLICA_PROVENANCE.md for explicit scope limits. No merge or deployment is performed by this workflow."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
