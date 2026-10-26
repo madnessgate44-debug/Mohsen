@@ -1,0 +1,59 @@
+name: Forge Agent Loop
+
+# Runs Forge as an agentic loop (look -> think -> act -> observe) on a mission
+# goal, instead of the fixed pipeline. Read-only by default; set allow_writes to
+# let it stage edits (still bounded by policy and the loop ceilings).
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        description: 'Mission goal for the loop (e.g. "read package.json and report the test script")'
+        required: true
+        default: 'List the repository files, then read README.md and summarize the project in one sentence.'
+      max_steps:
+        description: 'Maximum loop steps'
+        required: true
+        default: '6'
+      allow_writes:
+        description: 'Allow the loop to stage edits (requires a writable profile)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Forge loop
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          FORGE_LOOP_GOAL: ${{ github.event.inputs.goal }}
+          FORGE_LOOP_MAX_STEPS: ${{ github.event.inputs.max_steps }}
+          FORGE_LOOP_REF: main
+          FORGE_ALLOW_PR_CREATION: ${{ github.event.inputs.allow_writes }}
+        run: npx tsx src/agent/loop-runner.ts
+
+      - name: Upload loop evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-loop-evidence
+          path: .firstborn/evidence/
+          if-no-files-found: warn

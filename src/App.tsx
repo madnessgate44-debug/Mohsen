@@ -1,397 +1,492 @@
-import { useState, useEffect } from "react";
-import { Header } from "./components/Header";
-import { Sidebar } from "./components/Sidebar";
-import { BottomNav } from "./components/BottomNav";
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
-// Screen Components
-import { Dashboard } from "./components/Dashboard";
-import { PushFile } from "./components/PushFile";
-import { Explorer } from "./components/Explorer";
-import { Inspect } from "./components/Inspect";
-import { ReposList } from "./components/ReposList";
-import { CommitsList } from "./components/CommitsList";
-import { AgentChat } from "./components/AgentChat";
-import { Settings } from "./components/Settings";
-
-// Interfaces
-import { Repo, Branch, GitHubUser, Message, PushLogEntry, AppPrefs, AIConfig } from "./types";
+import React, { useState, useEffect } from 'react';
+import {
+  Shield,
+  GitBranch,
+  Terminal,
+  FileCheck2,
+  AlertTriangle,
+  Play,
+  RotateCw,
+  GitPullRequest,
+  CheckCircle2,
+  XCircle,
+  HelpCircle,
+  ExternalLink,
+  Smartphone,
+  Cpu,
+  Layers,
+  FileText
+} from 'lucide-react';
+import { TaskExecutionReport, TaskStatus } from './types/agent.ts';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<string>("dashboard");
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'agent' | 'matrix' | 'coordination' | 'export'>('agent');
+  const [repoStatus, setRepoStatus] = useState<any>(null);
+  const [healthStatus, setHealthStatus] = useState<any>(null);
+  const [loadingRepo, setLoadingRepo] = useState(false);
+  const [executingTask, setExecutingTask] = useState(false);
+  const [currentReport, setCurrentReport] = useState<TaskExecutionReport | null>(null);
+  const [coordinationContent, setCoordinationContent] = useState<string>('');
 
-  // GitHub credentials state
-  const [token, setToken] = useState<string>("");
-  const [connected, setConnected] = useState<boolean>(false);
-  const [user, setUser] = useState<GitHubUser | null>(null);
+  // Task form state
+  const [taskTitle, setTaskTitle] = useState('Verify Repository Baseline & Core Types');
+  const [taskDescription, setTaskDescription] = useState('Run TypeScript verification checks and ensure no syntax or typing errors exist in codebase.');
+  const [targetRepo, setTargetRepo] = useState('madnessgate44-debug/Firstborn');
+  const [githubToken, setGithubToken] = useState('');
+  const [allowPr, setAllowPr] = useState(false);
 
-  // Repositories & Workspace context state
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [activeRepo, setActiveRepo] = useState<Repo | null>(null);
-  const [activeBranch, setActiveBranch] = useState<string>("main");
-  const [branches, setBranches] = useState<Branch[]>([]);
+  // Negative test state
+  const [negativeTestMsg, setNegativeTestMsg] = useState<string | null>(null);
 
-  // Logs & Messages states (Persisted)
-  const [recentPushes, setRecentPushes] = useState<PushLogEntry[]>([]);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome-1",
-      role: "assistant",
-      content: "👋 Hello! I am your server-side Gemini AI Developer Agent.\n\nI am fully connected to your repository context and authorized to list, read, search, and push file commits directly to your GitHub workspace.\n\nHow can I help you build or inspect your repository today?",
-      timestamp: new Date().toLocaleTimeString(),
-    },
-  ]);
-
-  // General Defaults Prefs
-  const [prefs, setPrefs] = useState<AppPrefs>({
-    defaultCommit: "Update via Mission Control",
-    defaultBranch: "main",
-  });
-
-  // Safe fetch helper for github proxy
-  const githubProxyRequest = async (path: string, method = "GET", body?: any): Promise<any> => {
-    const headers: any = {
-      Authorization: `token ${token}`,
-      "Content-Type": "application/json",
-    };
-
-    const url = `/api/github${path}`;
-    const res = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || data.message || `HTTP ${res.status}`);
-    }
-    return data;
-  };
-
-  // On App Initial Load: Hydrate states from local storage
   useEffect(() => {
-    // 1. Load preferences
-    const savedPrefs = localStorage.getItem("mr_prefs");
-    if (savedPrefs) {
-      try {
-        setPrefs(JSON.parse(savedPrefs));
-      } catch (e) {}
-    }
-
-    // 2. Load recent pushes
-    const savedPushes = localStorage.getItem("mr_recent_pushes");
-    if (savedPushes) {
-      try {
-        setRecentPushes(JSON.parse(savedPushes));
-      } catch (e) {}
-    }
-
-    // 3. Load chat log
-    const savedMessages = localStorage.getItem("mr_chat_messages");
-    if (savedMessages) {
-      try {
-        setMessages(JSON.parse(savedMessages));
-      } catch (e) {}
-    }
-
-    // 4. Load & connect token
-    const savedToken = localStorage.getItem("mr_pat");
-    if (savedToken) {
-      setToken(savedToken);
-      authenticateToken(savedToken);
-    }
+    fetchHealth();
+    fetchRepoInspection();
+    fetchCoordinationDoc();
   }, []);
 
-  const authenticateToken = async (pat: string) => {
+  const fetchHealth = async () => {
     try {
-      const headers = {
-        Authorization: `token ${pat}`,
+      const res = await fetch('/api/health');
+      if (res.ok) {
+        const data = await res.json();
+        setHealthStatus(data);
+      }
+    } catch {
+      // Offline fallback
+    }
+  };
+
+  const fetchRepoInspection = async () => {
+    setLoadingRepo(true);
+    try {
+      const headers: Record<string, string> = {};
+      if (githubToken.trim()) {
+        headers['Authorization'] = `Bearer ${githubToken.trim()}`;
+      }
+      const res = await fetch(`/api/github/inspect?repo=${encodeURIComponent(targetRepo)}`, { headers });
+      const data = await res.json();
+      setRepoStatus(res.ok ? data : { exists: false, errorMessage: data.error });
+    } catch (err: any) {
+      setRepoStatus({ exists: false, errorMessage: err.message });
+    } finally {
+      setLoadingRepo(false);
+    }
+  };
+
+  const fetchCoordinationDoc = async () => {
+    try {
+      const res = await fetch('/api/coordination');
+      if (res.ok) {
+        const data = await res.json();
+        setCoordinationContent(data.content);
+      }
+    } catch {
+      // Handled silently
+    }
+  };
+
+  const runTask = async () => {
+    setExecutingTask(true);
+    setNegativeTestMsg(null);
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
       };
-      // Pull user details to authenticate
-      const res = await fetch("/api/github/user", { headers });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "GitHub auth validation failed.");
+      if (githubToken.trim()) {
+        headers['Authorization'] = `Bearer ${githubToken.trim()}`;
       }
 
-      setUser(data);
-      setConnected(true);
-
-      // Load repositories
-      const reposRes = await fetch("/api/github/user/repos?sort=updated&per_page=100", { headers });
-      const reposData = await reposRes.json();
-      if (reposRes.ok && Array.isArray(reposData)) {
-        setRepos(reposData);
-
-        // Auto select last active repo if saved
-        const lastRepoFullName = localStorage.getItem("mr_last_repo");
-        if (lastRepoFullName) {
-          const found = reposData.find((r: Repo) => r.full_name === lastRepoFullName);
-          if (found) {
-            handleRepoSelect(found, pat);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Auto authentication failed", err);
-      localStorage.removeItem("mr_pat");
-      setConnected(false);
-    }
-  };
-
-  const loadBranches = async (repo: Repo, pat: string) => {
-    try {
-      const res = await fetch(`/api/github/repos/${repo.full_name}/branches`, {
-        headers: {
-          Authorization: `token ${pat}`,
-        },
+      const res = await fetch('/api/tasks/run', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          title: taskTitle,
+          description: taskDescription,
+          targetRepo,
+          allowPrCreation: allowPr,
+        }),
       });
-      const data = await res.json();
-      if (res.ok && Array.isArray(data)) {
-        setBranches(data);
-        const lastBranch = localStorage.getItem("mr_last_branch") || repo.default_branch || "main";
-        const foundBranch = data.find((b: Branch) => b.name === lastBranch);
-        setActiveBranch(foundBranch ? foundBranch.name : data[0]?.name || "main");
+
+      const report = await res.json();
+      if (!res.ok || !report.status) {
+        alert(`Request rejected (HTTP ${res.status}): ${report.error || 'unknown error'}`);
+        return;
       }
-    } catch (e) {
-      console.error(e);
+      setCurrentReport(report as TaskExecutionReport);
+    } catch (err: any) {
+      alert(`Task execution failed: ${err.message}`);
+    } finally {
+      setExecutingTask(false);
     }
   };
 
-  const handleTokenChange = (pat: string) => {
-    setToken(pat);
-    localStorage.setItem("mr_pat", pat);
-    authenticateToken(pat);
+  const triggerNegativeTest = async () => {
+    setNegativeTestMsg(null);
+    try {
+      const res = await fetch('/api/tasks/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(githubToken.trim() ? { Authorization: `Bearer ${githubToken.trim()}` } : {}),
+        },
+        body: JSON.stringify({
+          title: '',
+          description: '',
+          targetRepo: 'madnessgate44-debug/Firstborn',
+        }),
+      });
+      const report: TaskExecutionReport & { error?: string } = await res.json();
+      if (!res.ok && !report.status) {
+        setNegativeTestMsg(`NEGATIVE TEST BLOCKED: HTTP ${res.status} ${report.error ?? ''}. Enter a valid GitHub PAT.`);
+        return;
+      }
+      if (report.status === 'FAILED') {
+        setNegativeTestMsg(`NEGATIVE TEST PASSED: Task was rejected as expected with error: "${report.errorMessage}"`);
+      } else {
+        setNegativeTestMsg(`NEGATIVE TEST FAILED: Task was unexpectedly accepted with status ${report.status}`);
+      }
+    } catch (err: any) {
+      setNegativeTestMsg(`NEGATIVE TEST EXCEPTION: ${err.message}`);
+    }
   };
 
-  const handleTokenDisconnect = () => {
-    setToken("");
-    setConnected(false);
-    setUser(null);
-    setRepos([]);
-    setActiveRepo(null);
-    setBranches([]);
-    localStorage.removeItem("mr_pat");
-    localStorage.removeItem("mr_last_repo");
-    localStorage.removeItem("mr_last_branch");
-  };
-
-  const handleRepoSelect = (repo: Repo, customToken?: string) => {
-    setActiveRepo(repo);
-    localStorage.setItem("mr_last_repo", repo.full_name);
-    loadBranches(repo, customToken || token);
-  };
-
-  const handleBranchSelect = (branchName: string) => {
-    setActiveBranch(branchName);
-    localStorage.setItem("mr_last_branch", branchName);
-  };
-
-  const handleSendMessage = (msg: Message) => {
-    const updated = [...messages, msg];
-    setMessages(updated);
-    localStorage.setItem("mr_chat_messages", JSON.stringify(updated));
-  };
-
-  const handlePushCompleted = (path: string, commitSha: string) => {
-    const log: PushLogEntry = {
-      id: Math.random().toString(),
-      timestamp: new Date().toLocaleTimeString() + " - " + new Date().toLocaleDateString(),
-      type: "success",
-      message: `Pushed file "${path}" (Commit: ${commitSha})`,
+  const getStatusBadge = (status: TaskStatus) => {
+    const styles: Record<TaskStatus, string> = {
+      QUEUED: 'bg-slate-800 text-slate-300 border-slate-700',
+      VALIDATING: 'bg-indigo-950 text-indigo-300 border-indigo-800',
+      INSPECTING: 'bg-sky-950 text-sky-300 border-sky-800',
+      PLANNING: 'bg-purple-950 text-purple-300 border-purple-800',
+      EDITING: 'bg-amber-950 text-amber-300 border-amber-800',
+      TESTING: 'bg-yellow-950 text-yellow-300 border-yellow-800',
+      VERIFYING: 'bg-emerald-950 text-emerald-300 border-emerald-800',
+      PR_OPENED: 'bg-green-950 text-green-300 border-green-700',
+      FAILED: 'bg-rose-950 text-rose-300 border-rose-800',
+      BLOCKED: 'bg-red-950 text-red-300 border-red-800',
+      CANCELLED: 'bg-slate-800 text-slate-400 border-slate-700',
     };
-    const updated = [...recentPushes, log];
-    setRecentPushes(updated);
-    localStorage.setItem("mr_recent_pushes", JSON.stringify(updated));
-  };
-
-  const handleSavePrefs = (newPrefs: AppPrefs) => {
-    setPrefs(newPrefs);
-    localStorage.setItem("mr_prefs", JSON.stringify(newPrefs));
-  };
-
-  const handlePurgeAll = () => {
-    localStorage.clear();
-    setToken("");
-    setConnected(false);
-    setUser(null);
-    setRepos([]);
-    setActiveRepo(null);
-    setBranches([]);
-    setRecentPushes([]);
-    setMessages([
-      {
-        id: "welcome-1",
-        role: "assistant",
-        content: "👋 Hello! I am your server-side Gemini AI Developer Agent. Everything has been reset.",
-        timestamp: new Date().toLocaleTimeString(),
-      },
-    ]);
-    setPrefs({
-      defaultCommit: "Update via Mission Control",
-      defaultBranch: "main",
-    });
-    setCurrentScreen("dashboard");
+    return (
+      <span className={`px-2.5 py-1 text-xs font-mono font-semibold rounded-md border ${styles[status] || styles.QUEUED}`}>
+        {status}
+      </span>
+    );
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#07090e] text-[#f1f5f9] select-none">
-      {/* Header banner */}
-      <Header
-        connected={connected}
-        username={user ? user.login : null}
-        activeRepo={activeRepo}
-        activeBranch={activeBranch}
-        onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
-      />
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans pb-16">
+      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-4 py-3">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-black text-white text-base shadow-sm">
+              F
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="font-bold text-sm tracking-tight text-white">FIRSTBORN</span>
+                <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
+                  FORGE v1.0
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">Mobile Operator Control</p>
+            </div>
+          </div>
 
-      {/* Main body viewport */}
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Sidebar Drawer */}
-        <Sidebar
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-          repos={repos}
-          activeRepo={activeRepo}
-          activeBranch={activeBranch}
-          branches={branches}
-          onRepoChange={(fullName) => {
-            const found = repos.find((r) => r.full_name === fullName);
-            if (found) handleRepoSelect(found);
-          }}
-          onBranchChange={handleBranchSelect}
-          currentScreen={currentScreen}
-          onScreenChange={setCurrentScreen}
-        />
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1.5 text-xs bg-slate-800/80 px-2.5 py-1 rounded-md border border-slate-700/60">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-slate-300 font-mono text-[11px]">{healthStatus?.model?.model || healthStatus?.activeModel || 'keyless / freelm'}</span>
+            </div>
+          </div>
+        </div>
+      </header>
 
-        {/* Workspace Canvas */}
-        <main className="flex-1 overflow-y-auto px-4 py-4 pb-20 max-w-4xl mx-auto w-full">
-          {currentScreen === "dashboard" && (
-            <Dashboard
-              user={user}
-              reposCount={repos.length}
-              commitCount={recentPushes.length}
-              recentPushes={recentPushes}
-              activeRepo={activeRepo}
-              activeBranch={activeBranch}
-              onScreenChange={setCurrentScreen}
-            />
-          )}
+      <nav className="bg-slate-900/40 border-b border-slate-800/80 px-3 py-2 sticky top-[57px] z-40 backdrop-blur">
+        <div className="max-w-4xl mx-auto flex space-x-1 overflow-x-auto text-xs font-medium scrollbar-none">
+          <button
+            onClick={() => setActiveTab('agent')}
+            className={`px-3 py-1.5 rounded-md flex items-center space-x-1.5 transition-colors whitespace-nowrap ${
+              activeTab === 'agent'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            <span>Agent Console</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('matrix')}
+            className={`px-3 py-1.5 rounded-md flex items-center space-x-1.5 transition-colors whitespace-nowrap ${
+              activeTab === 'matrix'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <FileCheck2 className="w-3.5 h-3.5" />
+            <span>AC Matrix (1-18)</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('coordination')}
+            className={`px-3 py-1.5 rounded-md flex items-center space-x-1.5 transition-colors whitespace-nowrap ${
+              activeTab === 'coordination'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>COORDINATION.md</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('export')}
+            className={`px-3 py-1.5 rounded-md flex items-center space-x-1.5 transition-colors whitespace-nowrap ${
+              activeTab === 'export'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Phone Export</span>
+          </button>
+        </div>
+      </nav>
 
-          {currentScreen === "push" && (
-            <PushFile
-              activeRepo={activeRepo}
-              activeBranch={activeBranch}
-              repos={repos}
-              onRepoChange={(fullName) => {
-                const found = repos.find((r) => r.full_name === fullName);
-                if (found) handleRepoSelect(found);
-              }}
-              onBranchChange={handleBranchSelect}
-              onPushSuccess={(log) => {
-                const updated = [...recentPushes, log];
-                setRecentPushes(updated);
-                localStorage.setItem("mr_recent_pushes", JSON.stringify(updated));
-              }}
-              pushLog={recentPushes}
-              onClearLog={() => {
-                setRecentPushes([]);
-                localStorage.setItem("mr_recent_pushes", "[]");
-              }}
-              githubProxyRequest={githubProxyRequest}
-            />
-          )}
+      <main className="max-w-4xl mx-auto w-full p-4 flex-1 space-y-4">
+        {activeTab === 'agent' && (
+          <div className="space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <GitBranch className="w-4 h-4 text-indigo-400" />
+                  <h2 className="text-sm font-semibold text-white">Target Repository Inspection</h2>
+                </div>
+                <button
+                  onClick={fetchRepoInspection}
+                  disabled={loadingRepo}
+                  className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center space-x-1 border border-slate-700"
+                >
+                  <RotateCw className={`w-3 h-3 ${loadingRepo ? 'animate-spin' : ''}`} />
+                  <span className="text-[11px]">Refresh</span>
+                </button>
+              </div>
 
-          {currentScreen === "explorer" && (
-            <Explorer
-              activeRepo={activeRepo}
-              activeBranch={activeBranch}
-              githubProxyRequest={githubProxyRequest}
-              onFileSelectForEdit={(path, content) => {
-                // Pre-fill edits in the state context
-                const pathInput = document.getElementById("push-file-path") as HTMLInputElement;
-                if (pathInput) pathInput.value = path;
-                const contentInput = document.getElementById("push-content") as HTMLTextAreaElement;
-                if (contentInput) contentInput.value = content;
-              }}
-              onScreenChange={setCurrentScreen}
-            />
-          )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800/80">
+                  <span className="text-slate-400 block text-[11px]">Repository Slug</span>
+                  <span className="font-mono text-slate-200 font-medium">{targetRepo}</span>
+                </div>
+                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800/80">
+                  <span className="text-slate-400 block text-[11px]">GitHub Status</span>
+                  {repoStatus?.exists ? (
+                    <span className="text-emerald-400 font-semibold flex items-center space-x-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>EXISTS (Base SHA: {repoStatus.latestCommitSha?.slice?.(0, 7) || '—'})</span>
+                    </span>
+                  ) : (
+                    <span className="text-amber-400 font-semibold flex items-center space-x-1">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>NOT FOUND / UNAVAILABLE</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
 
-          {currentScreen === "inspect" && (
-            <Inspect
-              activeRepo={activeRepo}
-              activeBranch={activeBranch}
-              githubProxyRequest={githubProxyRequest}
-            />
-          )}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+              <h2 className="text-sm font-semibold text-white flex items-center space-x-2">
+                <Terminal className="w-4 h-4 text-indigo-400" />
+                <span>Submit Task to Forge</span>
+              </h2>
 
-          {currentScreen === "repos" && (
-            <ReposList
-              repos={repos}
-              activeRepo={activeRepo}
-              onRepoSelect={handleRepoSelect}
-              onRefresh={async () => {
-                const headers = { Authorization: `token ${token}` };
-                const res = await fetch("/api/github/user/repos?sort=updated&per_page=100", { headers });
-                const data = await res.json();
-                if (res.ok && Array.isArray(data)) {
-                  setRepos(data);
-                }
-              }}
-              githubProxyRequest={githubProxyRequest}
-            />
-          )}
+              <div className="space-y-2.5 text-xs">
+                <div>
+                  <label className="block text-slate-400 text-[11px] mb-1">Task Title</label>
+                  <input
+                    type="text"
+                    value={taskTitle}
+                    onChange={(e) => setTaskTitle(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                  />
+                </div>
 
-          {currentScreen === "commits" && (
-            <CommitsList
-              activeRepo={activeRepo}
-              activeBranch={activeBranch}
-              githubProxyRequest={githubProxyRequest}
-            />
-          )}
+                <div>
+                  <label className="block text-slate-400 text-[11px] mb-1">Task Description & Acceptance Criteria</label>
+                  <textarea
+                    rows={3}
+                    value={taskDescription}
+                    onChange={(e) => setTaskDescription(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                  />
+                </div>
 
-          {currentScreen === "agent" && (
-            <AgentChat
-              activeRepo={activeRepo}
-              activeBranch={activeBranch}
-              githubToken={token}
-              messages={messages}
-              onSendMessage={handleSendMessage}
-              onClearChat={() => {
-                setMessages([
-                  {
-                    id: "welcome-1",
-                    role: "assistant",
-                    content: "👋 Hello! I am your server-side Gemini AI Developer Agent. Conversational log cleared.",
-                    timestamp: new Date().toLocaleTimeString(),
-                  },
-                ]);
-                localStorage.setItem("mr_chat_messages", "[]");
-              }}
-            />
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1">Target Repository</label>
+                    <input
+                      type="text"
+                      value={targetRepo}
+                      onChange={(e) => setTargetRepo(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1">GitHub PAT (Required)</label>
+                    <input
+                      type="password"
+                      placeholder="ghp_... (stored only in memory)"
+                      value={githubToken}
+                      onChange={(e) => setGithubToken(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                    />
+                  </div>
+                </div>
 
-          {currentScreen === "settings" && (
-            <Settings
-              token={token}
-              onTokenChange={handleTokenChange}
-              onTokenDisconnect={handleTokenDisconnect}
-              user={user}
-              prefs={prefs}
-              onPrefsSave={handleSavePrefs}
-              aiConfig={{ provider: "gemini", apiKey: "", baseUrl: "", model: "gemini-3.5-flash" }}
-              onAIConfigSave={() => {}}
-              onPurgeAll={handlePurgeAll}
-              githubProxyRequest={githubProxyRequest}
-            />
-          )}
-        </main>
-      </div>
+                <div className="flex items-center space-x-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="allowPr"
+                    checked={allowPr}
+                    onChange={(e) => setAllowPr(e.target.checked)}
+                    className="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-0"
+                  />
+                  <label htmlFor="allowPr" className="text-slate-300 text-xs cursor-pointer">
+                    Authorize Pull Request creation if repository checks pass
+                  </label>
+                </div>
+              </div>
 
-      {/* Mobile-first bottom utility navigations */}
-      <BottomNav currentScreen={currentScreen} onScreenChange={setCurrentScreen} />
+              <div className="pt-2 flex flex-wrap gap-2">
+                <button
+                  onClick={runTask}
+                  disabled={executingTask}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs py-2.5 px-4 rounded-lg flex items-center justify-center space-x-2 transition-colors disabled:opacity-50 shadow-sm"
+                >
+                  <Play className={`w-3.5 h-3.5 ${executingTask ? 'animate-spin' : ''}`} />
+                  <span>{executingTask ? 'Forge Executing Task...' : 'Execute Task with Forge'}</span>
+                </button>
+
+                <button
+                  onClick={triggerNegativeTest}
+                  disabled={executingTask}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs py-2.5 px-3 rounded-lg border border-slate-700 transition-colors flex items-center space-x-1"
+                >
+                  <span>Test Negative Path (Validation Rejection)</span>
+                </button>
+              </div>
+
+              {negativeTestMsg && (
+                <div className="mt-2 p-2.5 rounded-lg bg-indigo-950/40 border border-indigo-800/60 text-xs font-mono text-indigo-200">
+                  {negativeTestMsg}
+                </div>
+              )}
+            </div>
+
+            {currentReport && (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                  <div className="flex items-center space-x-2">
+                    <FileCheck2 className="w-4 h-4 text-emerald-400" />
+                    <h3 className="text-sm font-semibold text-white">Execution Report: {currentReport.taskId}</h3>
+                  </div>
+                  <div>{getStatusBadge(currentReport.status)}</div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                    <span className="text-slate-400 text-[10px] block">Model Provider</span>
+                    <span className="font-mono text-slate-200">{currentReport.modelInvoked?.provider ?? '—'}</span>
+                  </div>
+                  <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                    <span className="text-slate-400 text-[10px] block">Inference Model</span>
+                    <span className="font-mono text-slate-200">{currentReport.modelInvoked?.model ?? '—'}</span>
+                  </div>
+                  <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                    <span className="text-slate-400 text-[10px] block">Base Commit</span>
+                    <span className="font-mono text-slate-200">{currentReport.baseCommitSha?.slice?.(0, 7) ?? '—'}</span>
+                  </div>
+                  <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                    <span className="text-slate-400 text-[10px] block">Status</span>
+                    <span className="font-mono text-slate-200">{currentReport.status}</span>
+                  </div>
+                </div>
+
+                {currentReport.errorMessage && (
+                  <div className="bg-rose-950/40 border border-rose-800/50 rounded-lg p-2.5 text-xs text-rose-200 font-mono">
+                    {currentReport.errorMessage}
+                  </div>
+                )}
+                {currentReport.blockerReason && (
+                  <div className="bg-amber-950/40 border border-amber-800/50 rounded-lg p-2.5 text-xs text-amber-200 font-mono">
+                    BLOCKED: {currentReport.blockerReason}
+                  </div>
+                )}
+                {currentReport.prUrl && (
+                  <a href={currentReport.prUrl} target="_blank" rel="noreferrer" className="inline-flex items-center space-x-1 text-xs text-indigo-300 hover:text-indigo-200">
+                    <GitPullRequest className="w-3.5 h-3.5" />
+                    <span>Open PR #{currentReport.prNumber}</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'matrix' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-slate-300 space-y-2">
+            <h2 className="text-sm font-semibold text-white flex items-center space-x-2">
+              <FileCheck2 className="w-4 h-4 text-indigo-400" />
+              <span>Acceptance Criteria Matrix</span>
+            </h2>
+            <p className="text-slate-400">Submit a task to populate the live requirements-to-evidence matrix.</p>
+            {currentReport?.requirements?.length ? (
+              <ul className="space-y-2">
+                {currentReport.requirements.map((r: any) => (
+                  <li key={r.id} className="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-slate-200">{r.id}</span>
+                      <span className="text-[10px] uppercase tracking-wide">{r.status}</span>
+                    </div>
+                    <p className="mt-1 text-slate-400">{r.description}</p>
+                    {r.evidence && <p className="mt-1 font-mono text-[11px] text-slate-500">{r.evidence}</p>}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        )}
+
+        {activeTab === 'coordination' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs">
+            <h2 className="text-sm font-semibold text-white flex items-center space-x-2 mb-2">
+              <FileText className="w-4 h-4 text-indigo-400" />
+              <span>COORDINATION.md</span>
+            </h2>
+            <pre className="whitespace-pre-wrap font-mono text-[11px] text-slate-400 max-h-[60vh] overflow-auto">
+              {coordinationContent || 'Loading coordination document…'}
+            </pre>
+          </div>
+        )}
+
+        {activeTab === 'export' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs text-slate-300 space-y-2">
+            <h2 className="text-sm font-semibold text-white flex items-center space-x-2">
+              <Smartphone className="w-4 h-4 text-indigo-400" />
+              <span>Phone Export</span>
+            </h2>
+            <p className="text-slate-400">Use the live report JSON from a completed task run as the hand-off artifact.</p>
+            {currentReport ? (
+              <pre className="bg-slate-950 border border-slate-800 rounded-lg p-3 font-mono text-[10px] overflow-auto max-h-80">
+                {JSON.stringify(currentReport, null, 2)}
+              </pre>
+            ) : (
+              <p className="text-slate-500">No report yet. Execute a task first.</p>
+            )}
+          </div>
+        )}
+      </main>
     </div>
   );
 }

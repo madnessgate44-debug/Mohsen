@@ -1,6 +1,8 @@
 {
-  "name": "Mission Control - GitHub AI Agent",
-  "description": "A comprehensive web-based dashboard and AI coding agent for managing GitHub repositories, browsing code, and pushing commits.",
+  "name": "Firstborn / Forge",
+  "description": "Mobile-directed coding agent application for controlled, verified GitHub repository engineering.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

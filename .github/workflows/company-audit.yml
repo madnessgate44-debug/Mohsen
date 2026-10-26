@@ -1,0 +1,70 @@
+name: Forge Company Audit
+
+# The software company performs a read-only audit of a target repository.
+# Forge and the company are one thing, living together on `main`.
+# Read-only: no target writes, no target code executed.
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: 'Target repository in owner/repo format'
+        required: true
+        default: 'madnessgate44-debug/Amina'
+      attempts:
+        description: 'Independent attempts per audit lens'
+        required: true
+        default: '2'
+      full:
+        description: 'Read every file (100% coverage); slower, one model call per chunk'
+        required: true
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  company-audit:
+    runs-on: ubuntu-latest
+    # The full-coverage sweep makes one model call per chunk (~91 for a 1.9 MB
+    # repository), so the ceiling has to allow for a slow free-tier run.
+    timeout-minutes: 120
+    steps:
+      - name: Check out the company
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the company audit
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORGE_AUDIT_ATTEMPTS: ${{ inputs.attempts }}
+          FORGE_AUDIT_FULL: ${{ inputs.full }}
+        run: |
+          if [ "${FORGE_AUDIT_FULL}" = "true" ]; then
+            npx tsx scripts/audit.ts --full "${{ inputs.target_repo }}"
+          else
+            npx tsx scripts/audit.ts "${{ inputs.target_repo }}"
+          fi
+
+      - name: Upload the audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: company-audit
+          path: |
+            .firstborn/evidence/company-audit.md
+            .firstborn/evidence/company-audit.json
+            .firstborn/evidence/company-audit-full.md
+            .firstborn/evidence/company-audit-full.json
+          if-no-files-found: warn

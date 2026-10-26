@@ -1,0 +1,64 @@
+name: Sentinel Verification Gate
+
+# M3 — the independent verifier that replaces the human merge gate.
+# Forge writes to an isolated forge/* branch and opens a PR into main. This
+# workflow re-runs the deterministic checks on that PR and decides whether it may
+# merge. It runs as a SEPARATE job with a fresh context, never Forge approving
+# itself.
+#
+# Safety model:
+#   - Only forge/* source branches are eligible (enforced here and in the engine).
+#   - main can never be a merge source.
+#   - The model judge is OFF by default; the deterministic checks are the authority.
+#   - Auto-merge only happens when the repository variable SENTINEL_AUTO_MERGE is
+#     "true". Out of the box this workflow verifies and reports only.
+#   - For the guarantee to be real, `main` must be protected (see README note):
+#     require this check and the `verify` check, and disallow direct pushes.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sentinel:
+    runs-on: ubuntu-latest
+    # Only verifier-eligible branches reach the checks. Anything else is skipped.
+    if: startsWith(github.head_ref, 'forge/')
+    steps:
+      - name: Checkout the pull request head (the code under test)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Sentinel verification
+        id: sentinel
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SENTINEL_SOURCE_BRANCH: ${{ github.head_ref }}
+          SENTINEL_TARGET_BRANCH: ${{ github.base_ref || 'main' }}
+          SENTINEL_PR_NUMBER: ${{ github.event.pull_request.number }}
+          SENTINEL_AUTO_MERGE: ${{ vars.SENTINEL_AUTO_MERGE }}
+          SENTINEL_MODEL_JUDGE: ${{ vars.SENTINEL_MODEL_JUDGE }}
+        run: npx tsx scripts/sentinel-run.ts
+
+      - name: Upload Sentinel decision evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-decision
+          path: .firstborn/evidence/sentinel-decision.json
+          if-no-files-found: warn
