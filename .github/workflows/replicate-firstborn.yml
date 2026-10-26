@@ -75,3 +75,70 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  forge:
+    if: contains(github.event.issue.labels.*.name, 'forge-task') && github.event.issue.author_association == 'OWNER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout the replica
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Forge Agent
+        id: forge
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: ${{ github.repository }}
+          TASK_ID: ${{ github.event.issue.number }}
+          TASK_TITLE: ${{ github.event.issue.title }}
+          TASK_DESC: ${{ github.event.issue.body }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npx tsx src/agent/forge-runner.ts
+
+      - name: Verify pushed branch if PR creation was blocked
+        if: steps.forge.outcome == 'failure'
+        env:
+          TASK_ID: ${{ github.event.issue.number }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT=".firstborn/evidence/${TASK_ID}.json"
+          if [[ ! -f "$REPORT" ]]; then
+            echo "::error::Forge failed and produced no evidence report."
+            exit 1
+          fi
+          BRANCH="$(node -e "const r=require('./$REPORT'); process.stdout.write(r.branchName || '')")"
+          if [[ -z "$BRANCH" ]]; then
+            echo "::error::Forge failed before a branch was created. See the evidence report."
+            exit 1
+          fi
+          REMOTE="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" "refs/heads/${BRANCH}" | awk 'NR==1 {print $1}')"
+          if [[ -z "$REMOTE" ]]; then
+            echo "::error::Forge report names branch '$BRANCH' but remote read-back did not find it."
+            exit 1
+          fi
+          echo "VERIFIED_BRANCH_PUSHED=$BRANCH"
+          echo "VERIFIED_REMOTE_SHA=$REMOTE"
+          echo "Forge pushed a branch; create the PR through the connected GitHub integration if repository policy blocks Actions from opening PRs."
+
+      - name: Upload Forge evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-replica-evidence
+          path: .firstborn/evidence/
+          if-no-files-found: warn
