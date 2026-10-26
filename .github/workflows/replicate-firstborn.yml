@@ -44,7 +44,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$BRANCH"
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          tar --exclude=.git -C /tmp/firstborn -cf - . | tar -xf -
+          tar --exclude=.git --exclude='./.github/workflows' -C /tmp/firstborn -cf - . | tar -xf -
           mkdir -p legacy-mohsen
           cp -a /tmp/mohsen-legacy/. legacy-mohsen/
           # Keep this replication workflow operational after the Firstborn snapshot is copied.
@@ -57,7 +57,7 @@ jobs:
           This branch is a source snapshot copied from the public repository
           https://github.com/madnessgate44-debug/Firstborn at the time this workflow ran.
 
-          The original Mohsen files are preserved under `legacy-mohsen/`.
+          The original Mohsen files are preserved under `legacy-mohsen/`. Source workflow files are restored separately through the connected GitHub API because the Actions workflow token cannot push workflow-file changes.
           The replication workflow is retained at `.github/workflows/replicate-firstborn.yml`
           so the operation can be repeated from the Mohsen default branch.
 
