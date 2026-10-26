@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   replicate:
-    if: contains(github.event.issue.labels.*.name, 'forge-replica') && github.event.issue.author_association == 'OWNER'
+    if: contains(github.event.issue.labels.*.name, 'enhancement') && startsWith(github.event.issue.title, 'REPLICATE-FIRSTBORN:') && github.event.issue.author_association == 'OWNER'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
