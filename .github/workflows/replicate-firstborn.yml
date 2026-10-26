@@ -3,6 +3,11 @@ name: Replicate Firstborn Forge into Mohsen
 on:
   issues:
     types: [labeled]
+  push:
+    branches:
+      - 'forge-replica/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -142,3 +147,26 @@ jobs:
           name: forge-replica-evidence
           path: .firstborn/evidence/
           if-no-files-found: warn
+
+  verify-replica:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout replica
+        uses: actions/checkout@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: TypeScript lint
+        run: npm run lint
+      - name: Unit and integration tests
+        run: npm test
+      - name: Production build
+        run: npm run build
