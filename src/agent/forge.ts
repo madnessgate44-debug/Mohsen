@@ -38,6 +38,16 @@ const PROTECTED_PATH_PATTERNS = [
 // Keep the total source context bounded for anonymous models with small context windows.
 const MAX_SOURCE_CONTEXT_CHARS = 24000;
 
+// Preserved legacy projects and source-only workflow copies are archival evidence,
+// not the active target application's code. Exclude them from inferred model context
+// so a task does not fill the prompt with unrelated legacy files.
+const CONTEXT_EXCLUDED_PREFIXES = ['legacy-mohsen/', 'replica-source/', '.firstborn/'];
+
+export function isContextExcludedPath(filePath: string): boolean {
+  const normalized = filePath.replace(/^\.\//, '');
+  return CONTEXT_EXCLUDED_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
 // Anonymous models sometimes wrap otherwise valid JSON in Markdown fences.
 // Normalize only that wrapper; JSON.parse remains the strict structural validator.
 function parseModelJson(text: string): any {
@@ -549,7 +559,7 @@ export class ForgeAgent {
       const explicitPaths = extractExplicitPaths(taskText, repoFilePaths);
       const eligibleSourcePaths = repoFilePaths
         .filter((p) => /\.(ts|tsx|js|jsx|mjs|cjs|json|md)$/.test(p))
-        .filter((p) => !p.startsWith('node_modules/') && !p.startsWith('dist/') && !p.startsWith('.git/'))
+        .filter((p) => !p.startsWith('node_modules/') && !p.startsWith('dist/') && !p.startsWith('.git/') && !isContextExcludedPath(p))
         .filter((p) => p !== 'package.json' && p !== 'AGENTS.md');
       // Exact user-named paths are authoritative. For inferred context, skip oversized files
       // and continue searching so an unrelated large file cannot block the whole mission.
@@ -610,7 +620,7 @@ export class ForgeAgent {
       const contextFiles = [
         { path: 'AGENTS.md', content: instructionText },
         { path: 'package.json', content: packageJsonContent },
-        { path: 'FILE_TREE_INVENTORY.txt', content: repoFilePaths.slice(0, 100).join('\n') },
+        { path: 'FILE_TREE_INVENTORY.txt', content: repoFilePaths.filter((p) => !isContextExcludedPath(p)).slice(0, 100).join('\n') },
         ...targetSourceFiles,
       ];
 
@@ -707,6 +717,60 @@ export class ForgeAgent {
         }
       }
       applyPlanToReport(parsedPlan);
+
+      // A syntactically valid empty plan is still a failed plan when the task
+      // requires a change. Retry once with a compact, relevant context instead
+      // of treating a low-capability model's empty response as the final answer.
+      if (report.plannedChanges.length === 0) {
+        if (!guardModelCall('empty-patch repair')) return finalize();
+        log('warn', 'Model returned a valid plan with zero changes; retrying once with compact context.');
+        const compactContextFiles = contextFiles
+          .filter((file) => ['AGENTS.md', 'package.json', 'FILE_TREE_INVENTORY.txt'].includes(file.path) || explicitPaths.includes(file.path))
+          .map((file) => ({
+            path: file.path,
+            content: file.path === 'AGENTS.md'
+              ? file.content.slice(0, 3500)
+              : file.path === 'package.json'
+                ? file.content.slice(0, 2200)
+                : file.path === 'FILE_TREE_INVENTORY.txt'
+                  ? file.content.split('\n').slice(0, 60).join('\n')
+                  : file.content,
+          }));
+        report.modelInvoked.callsCount += 1;
+        const compactRetry = await this.model.generatePlanAndPatch(
+          `Task: ${task.title}\nDetails: ${task.description}\n\nEMPTY-PLAN RECOVERY REQUIRED. Your previous response was valid JSON but proposed zero file changes. Re-evaluate the task using only the compact context supplied. If the task asks to create a file, return exactly one create change at the requested new path with complete useful content. If it asks to modify an existing file, use exact unique anchors copied from that file. Do not return an empty changes array unless the task is genuinely impossible; if blocked, explain the concrete blocker in summary. Return compact valid JSON only and include numbered requirements with testable acceptance criteria.`,
+          compactContextFiles
+        );
+        report.modelInvoked.provider = compactRetry.provider;
+        report.modelInvoked.model = compactRetry.model;
+        report.modelInvoked.fallbackUsed = compactRetry.fallbackUsed ?? false;
+        report.modelInvoked.keylessRouteErrors = [
+          ...(report.modelInvoked.keylessRouteErrors ?? []),
+          ...(compactRetry.keylessRouteErrors ?? []),
+        ];
+        if (!compactRetry.success) {
+          report.status = 'FAILED';
+          report.errorMessage = `Compact empty-plan recovery failed: ${compactRetry.error}`;
+          log('error', report.errorMessage);
+          return finalize();
+        }
+        try {
+          parsedPlan = parseModelJson(compactRetry.text);
+          applyPlanToReport(parsedPlan);
+        } catch (retryError: any) {
+          report.status = 'FAILED';
+          report.errorMessage = `Compact empty-plan recovery returned an invalid plan: ${String(retryError?.message || retryError)}`;
+          log('error', report.errorMessage);
+          return finalize();
+        }
+        if (report.plannedChanges.length === 0) {
+          report.status = 'FAILED';
+          report.errorMessage = 'Model returned an empty patch after one compact-context recovery attempt.';
+          log('error', report.errorMessage);
+          return finalize();
+        }
+        trace('PLAN', 'REPAIRED', `compact retry proposed ${report.plannedChanges.length} file changes`);
+      }
 
       // Retry malformed exact anchors at most twice. Never relax matching or apply a guessed edit.
       let anchorProblems = this.findEditAnchorProblems(report.plannedChanges, contextFiles);
